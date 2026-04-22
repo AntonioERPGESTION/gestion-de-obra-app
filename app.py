@@ -1,86 +1,131 @@
 import streamlit as st
 from st_supabase_connection import SupabaseConnection
-
-# Intentar conectar
-try:
-    conn = st.connection("supabase", type=SupabaseConnection)
-    st.sidebar.success("✅ Conectado a la Base de Datos")
-except Exception as e:
-    st.sidebar.error("❌ Error de conexión")
-    st.sidebar.write(e)
-import streamlit as st
 import pandas as pd
 from datetime import datetime
-import os
 
-# Configuración de la página
-st.set_page_config(page_title="Gestión de Obra Eléctrica", layout="wide")
+# 1. CONFIGURACIÓN Y CONEXIÓN
+st.set_page_config(page_title="App Gestión Eléctrica", layout="wide", page_icon="⚡")
 
-# --- TÍTULO Y NAVEGACIÓN ---
-st.title("⚡ Sistema de Gestión de Instalaciones")
-menu = ["Dashboard", "Nueva Obra", "Registro de Horas", "Albaranes y Archivos"]
-choice = st.sidebar.selectbox("Menú Principal", menu)
+try:
+    conn = st.connection("supabase", type=SupabaseConnection)
+except Exception as e:
+    st.error("Error de conexión. Revisa los Secrets en Streamlit Cloud.")
+    st.stop()
 
-# --- FUNCIONES DE PERSISTENCIA (Base de datos local en CSV) ---
-def guardar_datos(df, filename):
-    df.to_csv(filename, index=False)
+# 2. SISTEMA DE LOGIN SENCILLO
+def check_password():
+    if "password_correct" not in st.session_state:
+        st.title("🔐 Acceso Sistema Eléctrico")
+        password = st.text_input("Introduce la contraseña del equipo", type="password")
+        if st.button("Entrar"):
+            if password == "Electricidad2024": # <--- CAMBIA ESTO
+                st.session_state["password_correct"] = True
+                st.rerun()
+            else:
+                st.error("Contraseña incorrecta")
+        return False
+    return True
 
-def cargar_datos(filename, columnas):
-    if os.path.exists(filename):
-        return pd.read_csv(filename)
-    return pd.DataFrame(columns=columnas)
+if check_password():
+    # 3. MENÚ LATERAL
+    st.sidebar.title("🛠️ Menú Principal")
+    menu = ["📊 Dashboard", "🏗️ Gestión de Obras", "⏱️ Registro de Horas", "📂 Documentación", "⚙️ Administración"]
+    choice = st.sidebar.radio("Ir a:", menu)
 
-# --- SECCIONES ---
-
-if choice == "Dashboard":
-    st.subheader("📊 Estado de las Obras")
-    df_obras = cargar_datos("obras.csv", ["ID", "Nombre", "Cliente", "Estado"])
-    if not df_obras.empty:
-        st.dataframe(df_obras, use_container_width=True)
-    else:
-        st.info("No hay obras registradas.")
-
-elif choice == "Nueva Obra":
-    st.subheader("🏗️ Registrar Nueva Obra")
-    with st.form("form_obra"):
-        id_obra = st.text_input("ID Obra (ej: 2024-01)")
-        nombre = st.text_input("Nombre de la Obra")
-        cliente = st.text_input("Cliente")
-        submit = st.form_submit_button("Crear Obra")
+    # --- PANTALLA: DASHBOARD ---
+    if choice == "📊 Dashboard":
+        st.title("📊 Estado Global de las Obras")
         
-        if submit:
-            df = cargar_datos("obras.csv", ["ID", "Nombre", "Cliente", "Estado"])
-            nueva_fila = pd.DataFrame([[id_obra, nombre, cliente, "Activa"]], columns=df.columns)
-            df = pd.concat([df, nueva_fila], ignore_index=True)
-            guardar_datos(df, "obras.csv")
-            st.success(f"Obra '{nombre}' creada correctamente.")
-
-elif choice == "Registro de Horas":
-    st.subheader("⏱️ Reporte de Personal")
-    df_obras = cargar_datos("obras.csv", ["ID", "Nombre"])
-    
-    with st.form("form_horas"):
-        obra_sel = st.selectbox("Seleccionar Obra", df_obras["Nombre"].tolist() if not df_obras.empty else ["N/A"])
-        operario = st.text_input("Nombre del Operario")
-        horas = st.number_input("Horas trabajadas", min_value=0.5, step=0.5)
-        comentario = st.text_area("Tareas realizadas")
-        submit_h = st.form_submit_button("Registrar Horas")
+        # Resumen visual
+        res = conn.query("cantidad_horas, obras(nombre)", table="horas").execute()
+        if res.data:
+            df_resumen = pd.DataFrame(res.data)
+            df_resumen['obra'] = df_resumen['obras'].apply(lambda x: x['nombre'] if x else "Sin nombre")
+            st.subheader("Consumo de Horas por Proyecto")
+            st.bar_chart(df_resumen.groupby('obra')['cantidad_horas'].sum())
         
-        if submit_h:
-            df_h = cargar_datos("horas.csv", ["Fecha", "Obra", "Operario", "Horas", "Tarea"])
-            nueva_h = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d"), obra_sel, operario, horas, comentario]], columns=df_h.columns)
-            df_h = pd.concat([df_h, nueva_h], ignore_index=True)
-            guardar_datos(df_h, "horas.csv")
-            st.success("Horas guardadas.")
+        st.subheader("Lista de Obras Activas")
+        obras_data = conn.query("*", table="obras").execute()
+        if obras_data.data:
+            st.dataframe(pd.DataFrame(obras_data.data), use_container_width=True)
 
-elif choice == "Albaranes y Archivos":
-    st.subheader("📂 Gestión de Documentación")
-    subida = st.file_uploader("Subir albarán o plano (PDF/JPG)", type=["pdf", "jpg", "png"])
-    if subida:
-        # Aquí podrías conectar con AWS S3 o Google Drive API
-        # Por ahora lo guardamos en una carpeta local 'uploads'
-        if not os.path.exists("uploads"):
-            os.makedirs("uploads")
-        with open(os.path.join("uploads", subida.name), "wb") as f:
-            f.write(subida.getbuffer())
-        st.success(f"Archivo {subida.name} guardado en el servidor.")
+    # --- PANTALLA: GESTIÓN DE OBRAS ---
+    elif choice == "🏗️ Gestión de Obras":
+        st.title("🏗️ Alta de Nuevos Proyectos")
+        with st.form("nueva_obra"):
+            nombre = st.text_input("Nombre de la Obra (ej: Polígono Ind. X)")
+            cliente = st.text_input("Cliente / Empresa")
+            if st.form_submit_button("Registrar Obra"):
+                if nombre:
+                    conn.table("obras").insert({"nombre": nombre, "cliente": cliente}).execute()
+                    st.success(f"Obra '{nombre}' creada con éxito.")
+                else:
+                    st.error("El nombre es obligatorio.")
+
+    # --- PANTALLA: REGISTRO DE HORAS ---
+    elif choice == "⏱️ Registro de Horas":
+        st.title("⏱️ Parte de Trabajo Diario")
+        obras_res = conn.query("id, nombre", table="obras").execute()
+        if obras_res.data:
+            obras_dict = {o['nombre']: o['id'] for o in obras_res.data}
+            with st.form("parte_horas"):
+                obra_sel = st.selectbox("Selecciona Obra", list(obras_dict.keys()))
+                operario = st.text_input("Tu Nombre")
+                h_trabajadas = st.number_input("Horas", min_value=0.5, step=0.5)
+                detalles = st.text_area("Tareas realizadas")
+                
+                if st.form_submit_button("Enviar Parte"):
+                    payload = {
+                        "obra_id": obras_dict[obra_sel],
+                        "operario": operario,
+                        "cantidad_horas": h_trabajadas,
+                        "tarea": detalles
+                    }
+                    conn.table("horas").insert(payload).execute()
+                    st.success("Parte enviado correctamente.")
+        else:
+            st.warning("Primero debes crear una obra en 'Gestión de Obras'.")
+
+    # --- PANTALLA: DOCUMENTACIÓN ---
+    elif choice == "📂 Documentación":
+        st.title("📂 Archivos y Albaranes")
+        obras_res = conn.query("id, nombre", table="obras").execute()
+        if obras_res.data:
+            obra_doc = st.selectbox("Asociar archivo a:", [o['nombre'] for o in obras_res.data])
+            archivo = st.file_uploader("Subir PDF o Imagen", type=["pdf", "jpg", "png", "jpeg"])
+            
+            if st.button("Subir al Sistema") and archivo:
+                # Ruta: NombreObra/NombreArchivo
+                nombre_archivo = f"{obra_doc}/{datetime.now().strftime('%Y%m%d')}_{archivo.name}"
+                try:
+                    conn.storage.from_("archivos_obra").upload(nombre_archivo, archivo.getvalue())
+                    st.success(f"Archivo subido correctamente a la carpeta de {obra_doc}")
+                except Exception as e:
+                    st.error(f"Error al subir: {e}. ¿Has creado el bucket 'archivos_obra' en Supabase?")
+
+    # --- PANTALLA: ADMINISTRACIÓN ---
+    elif choice == "⚙️ Administración":
+        st.title("⚙️ Panel Administrativo")
+        admin_pass = st.text_input("Clave Maestra", type="password")
+        
+        if admin_pass == "AdminElect_2026":
+            tab1, tab2 = st.tabs(["📊 Exportar Datos", "🗑️ Borrar Registros"])
+            
+            with tab1:
+                st.subheader("Descargar histórico")
+                res_h = conn.query("*", table="horas").execute()
+                if res_h.data:
+                    df_final = pd.DataFrame(res_h.data)
+                    csv = df_final.to_csv(index=False).encode('utf-8')
+                    st.download_button("📥 Descargar Horas en CSV", csv, "horas_obra.csv", "text/csv")
+            
+            with tab2:
+                st.subheader("Zona de Peligro")
+                obras_lista = conn.query("*", table="obras").execute()
+                if obras_lista.data:
+                    df_o = pd.DataFrame(obras_lista.data)
+                    id_borrar = st.selectbox("ID Obra a eliminar", df_o['id'].tolist())
+                    if st.button("⚠️ ELIMINAR OBRA PERMANENTEMENTE"):
+                        conn.table("obras").delete().eq("id", id_borrar).execute()
+                        st.warning("Obra eliminada. Recuerda configurar DELETE CASCADE en Supabase.")
+                        st.rerun()
