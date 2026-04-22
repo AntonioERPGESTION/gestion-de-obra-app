@@ -1,3 +1,5 @@
+# Así es como Streamlit busca la sección [connections.supabase]
+conn = st.connection("supabase", type=SupabaseConnection)
 import streamlit as st
 import pandas as pd
 from datetime import datetime
