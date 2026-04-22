@@ -1,3 +1,11 @@
+# Reemplaza tu bloque de conexión por este para diagnosticar:
+try:
+    # Esto busca automáticamente la sección [connections.supabase] en tus Secrets
+    conn = st.connection("supabase", type=SupabaseConnection)
+except Exception as e:
+    st.error("🚨 Error técnico detallado:")
+    st.code(str(e)) # Esto nos dirá si es un problema de URL, de Key o de red
+    st.stop()
 import streamlit as st
 from st_supabase_connection import SupabaseConnection
 import pandas as pd
