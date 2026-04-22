@@ -1,4 +1,14 @@
 import streamlit as st
+from st_supabase_connection import SupabaseConnection
+
+# Intentar conectar
+try:
+    conn = st.connection("supabase", type=SupabaseConnection)
+    st.sidebar.success("✅ Conectado a la Base de Datos")
+except Exception as e:
+    st.sidebar.error("❌ Error de conexión")
+    st.sidebar.write(e)
+import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os
